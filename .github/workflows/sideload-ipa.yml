@@ -1,0 +1,95 @@
+name: Sideload IPA
+
+run-name: Sideload IPA from ${{ inputs.ref || github.ref_name }} by @${{ github.actor }}
+
+# An unsigned Zeron.ipa for SideStore / AltStore / Sideloadly, which re-sign
+# it with the installer's own Apple ID. No Apple credentials here: nothing is
+# signed and nothing is uploaded to Apple. The build drops the Push
+# entitlement (a free Apple ID can't sign it, and session notifications only
+# reach the official sh.zeron.ios build anyway).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or commit to build (empty: this branch)'
+        type: string
+        default: ''
+      keep_live_activity:
+        description: 'Keep the Live Activity extension (uses one more App ID on a free account)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sideload-ipa
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    # Cold Rust core build (release profile, thin LTO) + archive.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Rust toolchain + iOS targets
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ios-core
+          cache-on-failure: true
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Archive build (unsigned)
+        working-directory: apps/ios
+        run: |
+          xcodebuild -project Zeron.xcodeproj -scheme Zeron \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Zeron.xcarchive" archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+
+      - name: Package Zeron.ipa
+        env:
+          KEEP_LIVE_ACTIVITY: ${{ inputs.keep_live_activity }}
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/Zeron.xcarchive/Products/Applications/Zeron.app"
+          test -d "$app"
+          if [ "$KEEP_LIVE_ACTIVITY" != "true" ]; then
+            rm -rf "$app/PlugIns"
+          fi
+          # An unsigned archive carries no entitlements: nothing to strip.
+          if codesign -d --entitlements :- "$app" 2>/dev/null | grep -q aps-environment; then
+            echo "Unexpected Push entitlement on the unsigned app." >&2
+            exit 1
+          fi
+          stage="$RUNNER_TEMP/ipa"
+          mkdir -p "$stage/Payload"
+          cp -R "$app" "$stage/Payload/"
+          (cd "$stage" && zip -qry "$GITHUB_WORKSPACE/Zeron.ipa" Payload)
+          ls -lh "$GITHUB_WORKSPACE/Zeron.ipa"
+          echo "BUILT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      # A release asset downloads straight from Safari on the iPhone (an
+      # Actions artifact needs a GitHub login and comes zipped).
+      - name: Publish as the "sideload" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete sideload --yes --cleanup-tag 2>/dev/null || true
+          gh release create sideload Zeron.ipa \
+            --target "$GITHUB_SHA" \
+            --title "Zeron sideload build ${{ github.run_number }}" \
+            --notes "Unsigned build of \`$BUILT_SHA\` (${{ inputs.ref || github.ref_name }}) for SideStore / AltStore / Sideloadly. Not an official Zeron release; no push notifications." \
+            --prerelease
