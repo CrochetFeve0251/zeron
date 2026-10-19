@@ -43,7 +43,19 @@ if [ "${1:-}" != "--force" ] && [ -f "$STATE" ]; then
   fi
 fi
 
-command -v xcodebuild >/dev/null || echec "Xcode introuvable"
+# Les outils sélectionnés peuvent être les seuls Command Line Tools (sans
+# devicectl ni signature pour iPhone) : utiliser l'app Xcode directement.
+if [ -z "${DEVELOPER_DIR:-}" ] && ! xcode-select -p 2>/dev/null | grep -q '\.app/'; then
+  for x in /Applications/Xcode.app /Applications/Xcode-beta.app /Applications/Xcode*.app; do
+    if [ -d "$x/Contents/Developer" ]; then
+      export DEVELOPER_DIR="$x/Contents/Developer"
+      break
+    fi
+  done
+fi
+xcrun --find devicectl >/dev/null 2>&1 \
+  || echec "Xcode introuvable : installe-le, ou choisis-le avec sudo xcode-select -s /Applications/Xcode.app"
+log "Xcode : ${DEVELOPER_DIR:-$(xcode-select -p)}"
 command -v rustup >/dev/null || echec "rustup introuvable (https://rustup.rs)"
 rustup target add aarch64-apple-ios >/dev/null
 
