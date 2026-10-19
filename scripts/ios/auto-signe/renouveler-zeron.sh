@@ -127,6 +127,15 @@ sed -i '' \
   -e '/CODE_SIGN_ENTITLEMENTS = Zeron.entitlements;/d' \
   "$pbx"
 
+# build-core.sh lance cargo dans un environnement vidé (env -i) : sans
+# xcode-select vers Xcode, il perdrait le DEVELOPER_DIR choisi plus haut et ne
+# trouverait pas le SDK iphoneos.
+if [ -n "${DEVELOPER_DIR:-}" ]; then
+  sed -i '' "s|^  env -i HOME=|  env -i DEVELOPER_DIR=\"$DEVELOPER_DIR\" HOME=|" scripts/ios/build-core.sh
+  grep -q 'env -i DEVELOPER_DIR=' scripts/ios/build-core.sh \
+    || echec "build-core.sh a changé : lance sudo xcode-select -s $DEVELOPER_DIR"
+fi
+
 # Un profil de 7 jours tout neuf : on retire ceux en cache pour ces identifiants.
 for d in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
          "$HOME/Library/MobileDevice/Provisioning Profiles"; do
