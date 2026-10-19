@@ -64,7 +64,8 @@ jobs:
 
       - name: Package Zeron.ipa
         env:
-          KEEP_LIVE_ACTIVITY: ${{ inputs.keep_live_activity }}
+          # Empty on push: keep it unless explicitly turned off.
+          KEEP_LIVE_ACTIVITY: ${{ inputs.keep_live_activity != false }}
         run: |
           set -euo pipefail
           app="$RUNNER_TEMP/Zeron.xcarchive/Products/Applications/Zeron.app"
