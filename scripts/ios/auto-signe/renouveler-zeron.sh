@@ -33,7 +33,7 @@ echec() {
   osascript -e "display notification \"$*\" with title \"Zeron iPhone : renouvellement raté\"" 2>/dev/null || true
   exit 1
 }
-trap 'echec "erreur ligne $LINENO (voir le journal)"' ERR
+trap 'echec "ligne $LINENO : $BASH_COMMAND"' ERR
 
 if [ "${1:-}" != "--force" ] && [ -f "$STATE" ]; then
   age=$(( ($(date +%s) - $(cat "$STATE")) / 86400 ))
@@ -47,13 +47,32 @@ command -v xcodebuild >/dev/null || echec "Xcode introuvable"
 command -v rustup >/dev/null || echec "rustup introuvable (https://rustup.rs)"
 rustup target add aarch64-apple-ios >/dev/null
 
-# Équipe : la « Personal Team » du compte Apple ajouté dans Xcode → Réglages → Comptes.
+# Équipe : la « Personal Team » du compte Apple ajouté dans Xcode → Réglages
+# → Comptes. Lue dans les réglages d'Xcode, sinon dans le champ OU des
+# certificats « Apple Development » du trousseau.
+teams_from_xcode() {
+  defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier 2>/dev/null \
+    | sed -nE 's/.*teamID = "?([A-Z0-9]{10})"?;.*/\1/p' || true
+}
+teams_from_certificates() {
+  local dir c
+  dir=$(mktemp -d)
+  security find-certificate -a -c "Apple Development" -p 2>/dev/null \
+    | awk -v d="$dir" '/BEGIN CERT/{n++} n{print > (d "/" n ".pem")}' || true
+  for c in "$dir"/*.pem; do
+    [ -e "$c" ] || continue
+    openssl x509 -in "$c" -noout -subject 2>/dev/null \
+      | sed -nE 's/.*OU ?= ?([A-Z0-9]{10}).*/\1/p' || true
+  done
+  rm -rf "$dir"
+}
 if [ -z "$TEAM" ]; then
-  teams=$(defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier 2>/dev/null \
-    | sed -nE 's/.*teamID = "?([A-Z0-9]{10})"?;.*/\1/p' | sort -u)
-  [ "$(printf '%s\n' "$teams" | grep -c .)" = 1 ] \
-    || echec "équipe introuvable ou ambiguë ($teams) : mets ZERON_TEAM dans $CONFIG_DIR/config"
-  TEAM="$teams"
+  teams=$( { teams_from_xcode; teams_from_certificates; } | sort -u)
+  case "$(printf '%s\n' "$teams" | grep -c . || true)" in
+    1) TEAM="$teams" ;;
+    0) echec "équipe Apple introuvable : crée un certificat (Xcode → Réglages → Comptes → Gérer les certificats → + → Apple Development) ou mets ZERON_TEAM dans $CONFIG_DIR/config" ;;
+    *) echec "plusieurs équipes ($(echo $teams)) : mets ZERON_TEAM=… dans $CONFIG_DIR/config" ;;
+  esac
 fi
 PREFIX="${ZERON_BUNDLE_PREFIX:-local.$(printf '%s' "$TEAM" | tr '[:upper:]' '[:lower:]').zeron}"
 
