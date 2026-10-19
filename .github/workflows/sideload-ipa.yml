@@ -9,6 +9,10 @@ run-name: Sideload IPA from ${{ inputs.ref || github.ref_name }} by @${{ github.
 # reach the official sh.zeron.ios build anyway).
 
 on:
+  # A fork's workflow_dispatch only works from its default branch: building
+  # on push to this branch avoids touching the fork's main.
+  push:
+    branches: [sideload-ipa]
   workflow_dispatch:
     inputs:
       ref:
