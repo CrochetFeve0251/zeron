@@ -158,5 +158,6 @@ app="$derived/Build/Products/Release-iphoneos/Zeron.app"
 expire=$(security cms -D -i "$app/embedded.mobileprovision" | plutil -extract ExpirationDate raw -)
 log "Signée jusqu'au $expire ; installation…"
 xcrun devicectl device install app --device "$core_id" "$app" >/dev/null
+mkdir -p "$CONFIG_DIR"
 date +%s > "$STATE"
 log "Zeron installé sur $device_name (valable jusqu'au $expire)."
