@@ -64,14 +64,16 @@ jobs:
 
       - name: Package Zeron.ipa
         env:
-          # Empty on push: keep it unless explicitly turned off.
-          KEEP_LIVE_ACTIVITY: ${{ inputs.keep_live_activity != false }}
+          # No inputs on push (and null == false in expressions): keep it.
+          KEEP_LIVE_ACTIVITY: ${{ github.event_name == 'push' || inputs.keep_live_activity }}
         run: |
           set -euo pipefail
           app="$RUNNER_TEMP/Zeron.xcarchive/Products/Applications/Zeron.app"
           test -d "$app"
           if [ "$KEEP_LIVE_ACTIVITY" != "true" ]; then
             rm -rf "$app/PlugIns"
+          else
+            test -d "$app/PlugIns/ZeronLiveActivity.appex"
           fi
           # An unsigned archive carries no entitlements: nothing to strip.
           if codesign -d --entitlements :- "$app" 2>/dev/null | grep -q aps-environment; then
